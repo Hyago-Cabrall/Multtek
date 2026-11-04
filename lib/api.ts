@@ -20,10 +20,15 @@ export async function api(req:Request,env:any,ctx:ExecutionContext){
  if(!['GET','HEAD'].includes(method)&&req.headers.get('origin')!==url.origin)fail('Origem da solicitação inválida.',403);
  const cookie=(req.headers.get('cookie')||'').match(/(?:^|;\s*)multtek_session=([^;]+)/)?.[1];
  const user=cookie?await one('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? AND u.active=1 AND u.deleted=0',await digest(cookie),Date.now()):null;
- if(path==='auth'&&method==='GET'){const count=await one('SELECT COUNT(*) n FROM users');return json({user:user?safeUser(user):null,setup:!count.n,push:!!env.VAPID_PUBLIC_KEY,publicKey:env.VAPID_PUBLIC_KEY||null})}
+ if(path==='auth'&&method==='GET'){const count=await one('SELECT COUNT(*) n FROM users');return json({user:user?safeUser(user):null,setup:!count.n,setupKeyRequired:env.PUBLIC_DEPLOYMENT==='true',push:!!env.VAPID_PUBLIC_KEY,publicKey:env.VAPID_PUBLIC_KEY||null})}
  let b:any={};if(!['GET','DELETE'].includes(method)&&path!=='upload'){const raw=await req.text();if(raw){try{b=JSON.parse(raw)}catch{fail('JSON inválido.')}}}
  if(path==='setup'&&method==='POST'){
-  // Public deployment is not part of the setup workflow: owner-private platform boundary protects bootstrap.
+  if(await one("SELECT key FROM settings WHERE key='initialized'"))fail('A instalação já foi concluída.',409);
+  // Public bootstrap fails closed until the owner provisions a secret in Cloudflare.
+  if(env.PUBLIC_DEPLOYMENT==='true'){
+   if(typeof env.SETUP_TOKEN!=='string'||env.SETUP_TOKEN.length<32)fail('A instalação ainda não foi liberada pelo responsável.',503);
+   if(typeof b.setup_token!=='string'||b.setup_token.length>256||await digest(b.setup_token)!==await digest(env.SETUP_TOKEN))fail('Chave de instalação inválida.',403);
+  }
   validateUser({...b,role:'admin'},true);const id=uid();
   await db.batch([q("INSERT INTO settings(key,value) VALUES('initialized','1')"),q('INSERT INTO users(id,name,username,email,cpf,phone,password,role,active,created) VALUES(?,?,?,?,?,?,?,?,1,?)',id,b.name.trim(),b.username.toLowerCase(),b.email.toLowerCase(),b.cpf.replace(/\D/g,''),b.phone.replace(/\D/g,''),await password(b.password),'admin',now()),...['A fazer','Fazendo','Pausada','Finalizada'].map((s,i)=>q('INSERT INTO stages(id,name,color,position,initial,done) VALUES(?,?,?,?,?,?)',uid(),s,['#728199','#5f62e9','#e9a23b','#29a680'][i],i,i===0?1:0,i===3?1:0)),...['WhatsApp','Ligação','Ticket','Implantação'].map((s,i)=>q('INSERT INTO origins(id,name) VALUES(?,?)',String(i+1),s))]);return json({ok:true});
  }

@@ -12,7 +12,16 @@ let cookie='',checks=0;const check=(v,m)=>{assert.ok(v,m);checks++};
 async function request(path,method='GET',body,expected=200){const headers={origin:'https://test.local',cookie};if(body&&!(body instanceof FormData))headers['content-type']='application/json';const res=await api(new Request('https://test.local/api/'+path,{method,headers,body:body?(body instanceof FormData?body:JSON.stringify(body)):undefined}),env,ctx);const type=res.headers.get('content-type');const data=type?.includes('application/json')?await res.json():await res.text();assert.equal(res.status,expected,`${method} ${path}: ${JSON.stringify(data)}`);if(res.headers.get('set-cookie'))cookie=res.headers.get('set-cookie').split(';')[0];return data}
 const admin={name:'Administrador Teste',username:'qa.admin',email:'admin@example.test',cpf:'52998224725',phone:'62999999999',password:crypto.randomUUID()};
 check((await request('auth')).setup,'Banco novo permite primeiro administrador');
-await request('data','GET',null,401);await request('setup','POST',admin);await request('setup','POST',admin,409);await request('login','POST',{username:admin.username,password:'errada'},401);await request('login','POST',admin);let data=await request('data');check(data.user.role==='admin'&&data.stages.length===4,'Setup criou etapas e administrador');check(!('password' in data.user),'Hash não exposto');const adminCookie=cookie,adminId=data.user.id;
+await request('data','GET',null,401);
+env.PUBLIC_DEPLOYMENT='true';
+check((await request('auth')).setupKeyRequired,'Publicação pública exige chave de instalação');
+await request('setup','POST',admin,503);
+env.SETUP_TOKEN=crypto.randomUUID()+crypto.randomUUID();
+await request('setup','POST',admin,403);
+await request('setup','POST',{...admin,setup_token:'incorreta'},403);
+check(sqlite.prepare('SELECT COUNT(*) n FROM users').get().n===0,'Tentativas sem chave não criam administrador');
+check(!JSON.stringify(await request('auth')).includes(env.SETUP_TOKEN),'Chave secreta não aparece na API');
+await request('setup','POST',{...admin,setup_token:env.SETUP_TOKEN});await request('setup','POST',admin,409);await request('login','POST',{username:admin.username,password:'errada'},401);await request('login','POST',admin);let data=await request('data');check(data.user.role==='admin'&&data.stages.length===4,'Setup criou etapas e administrador');check(!('password' in data.user),'Hash não exposto');const adminCookie=cookie,adminId=data.user.id;
 await request('users/'+adminId,'DELETE',null,400);
 const member={name:'Membro Teste',username:'qa.membro',email:'membro@example.test',cpf:'11144477735',phone:'62988888888',password:crypto.randomUUID(),role:'member',active:1};await request('users','POST',member);await request('users','POST',member,409);await request('clients','POST',{name:'Cliente de Teste',uf:'GO',city:'Goiânia'});data=await request('data');const client=data.clients[0],memberId=data.users.find(u=>u.username===member.username).id;// Clientes legados sem CNPJ permanecem válidos; preenchimento e unicidade em ambos formatos.
 check(client.cnpj===null,'Migração mantém CNPJ vazio nos clientes sem documento');

@@ -2,6 +2,10 @@
 
 Aplicação web para acompanhar implantações e manutenções. Interface React/TypeScript, API em Cloudflare Workers, banco SQL D1/SQLite com migrations Drizzle e arquivos privados no R2. O projeto preserva a integração de build do Sites/Vinext.
 
+Para publicar em sua própria conta Cloudflare, use [CLOUDFLARE.md](CLOUDFLARE.md).
+Essa modalidade tem configuração própria e exige uma chave de instalação para o
+primeiro administrador; as instruções de site privado abaixo descrevem o ambiente original.
+
 ## Primeiro acesso
 
 1. Abra o endereço privado publicado.
