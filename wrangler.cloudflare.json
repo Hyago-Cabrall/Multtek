@@ -11,19 +11,17 @@
   "vars": {
     "PUBLIC_DEPLOYMENT": "true"
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "multtek-db",
-      "database_id": "e09b8e75-a594-4659-8a92-595e8e1b4334",
-      "migrations_dir": "drizzle"
-    }
-  ],
   "r2_buckets": [
     {
       "binding": "BUCKET",
       "bucket_name": "multtek-anexos"
     }
   ],
-  "account_id": "e9fe3d3233f2b304d5782c262819175e"
+  "account_id": "e9fe3d3233f2b304d5782c262819175e",
+  "observability": {
+    "enabled": true,
+    "traces": {
+      "enabled": true
+    }
+  }
 }

@@ -1,15 +1,17 @@
-import {DatabaseSync} from 'node:sqlite';
+import {PGlite} from '@electric-sql/pglite';
+import {Database} from '../db/postgres.ts';
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import {api} from '../lib/api.ts';
-const sqlite=new DatabaseSync(':memory:');sqlite.exec('PRAGMA foreign_keys=ON');sqlite.exec(readFileSync(new URL('../drizzle/0000_curvy_ezekiel_stane.sql',import.meta.url),'utf8'));
-sqlite.exec(readFileSync(new URL('../drizzle/0001_integrity.sql',import.meta.url),'utf8'));
-sqlite.exec(readFileSync(new URL('../drizzle/0002_parallel_doomsday.sql',import.meta.url),'utf8'));
-class Statement{constructor(sql,args=[]){this.sql=sql;this.args=args}bind(...args){return new Statement(this.sql,args)}async first(){return sqlite.prepare(this.sql).get(...this.args)||null}async all(){return {results:sqlite.prepare(this.sql).all(...this.args)}}async run(){const r=sqlite.prepare(this.sql).run(...this.args);return {success:true,meta:{changes:Number(r.changes),last_row_id:Number(r.lastInsertRowid)}}}}
-const db={prepare:s=>new Statement(s),batch:async jobs=>{sqlite.exec('BEGIN');try{const result=[];for(const j of jobs)result.push(await j.run());sqlite.exec('COMMIT');return result}catch(e){sqlite.exec('ROLLBACK');throw e}}};
+const pg=new PGlite();
+await pg.exec(readFileSync(new URL('../supabase/migrations/202611040001_initial.sql',import.meta.url),'utf8'));
+await pg.exec(readFileSync(new URL('../supabase/migrations/202611050001_enable_rls.sql',import.meta.url),'utf8'));
+await pg.exec('SET search_path TO multtek,pg_catalog');
+const db=new Database(pg,async()=>{});
+const factory=async()=>db;
 const objects=new Map(),env={DB:db,BUCKET:{put:async(id,b)=>objects.set(id,b),get:async id=>objects.has(id)?{body:objects.get(id)}:null,delete:async id=>objects.delete(id)}},ctx={waitUntil:p=>p.catch(()=>{})};
 let cookie='',checks=0;const check=(v,m)=>{assert.ok(v,m);checks++};
-async function request(path,method='GET',body,expected=200){const headers={origin:'https://test.local',cookie};if(body&&!(body instanceof FormData))headers['content-type']='application/json';const res=await api(new Request('https://test.local/api/'+path,{method,headers,body:body?(body instanceof FormData?body:JSON.stringify(body)):undefined}),env,ctx);const type=res.headers.get('content-type');const data=type?.includes('application/json')?await res.json():await res.text();assert.equal(res.status,expected,`${method} ${path}: ${JSON.stringify(data)}`);if(res.headers.get('set-cookie'))cookie=res.headers.get('set-cookie').split(';')[0];return data}
+async function request(path,method='GET',body,expected=200){const headers={origin:'https://test.local',cookie};if(body&&!(body instanceof FormData))headers['content-type']='application/json';const res=await api(new Request('https://test.local/api/'+path,{method,headers,body:body?(body instanceof FormData?body:JSON.stringify(body)):undefined}),env,ctx,factory);const type=res.headers.get('content-type');const data=type?.includes('application/json')?await res.json():await res.text();assert.equal(res.status,expected,`${method} ${path}: ${JSON.stringify(data)}`);if(res.headers.get('set-cookie'))cookie=res.headers.get('set-cookie').split(';')[0];return data}
 const admin={name:'Administrador Teste',username:'qa.admin',email:'admin@example.test',cpf:'52998224725',phone:'62999999999',password:crypto.randomUUID()};
 check((await request('auth')).setup,'Banco novo permite primeiro administrador');
 await request('data','GET',null,401);
@@ -19,7 +21,7 @@ await request('setup','POST',admin,503);
 env.SETUP_TOKEN=crypto.randomUUID()+crypto.randomUUID();
 await request('setup','POST',admin,403);
 await request('setup','POST',{...admin,setup_token:'incorreta'},403);
-check(sqlite.prepare('SELECT COUNT(*) n FROM users').get().n===0,'Tentativas sem chave não criam administrador');
+check((await pg.query('SELECT COUNT(*)::integer n FROM users')).rows[0].n===0,'Tentativas sem chave não criam administrador');
 check(!JSON.stringify(await request('auth')).includes(env.SETUP_TOKEN),'Chave secreta não aparece na API');
 await request('setup','POST',{...admin,setup_token:env.SETUP_TOKEN});await request('setup','POST',admin,409);await request('login','POST',{username:admin.username,password:'errada'},401);await request('login','POST',admin);let data=await request('data');check(data.user.role==='admin'&&data.stages.length===4,'Setup criou etapas e administrador');check(!('password' in data.user),'Hash não exposto');const adminCookie=cookie,adminId=data.user.id;
 await request('users/'+adminId,'DELETE',null,400);
@@ -35,7 +37,7 @@ const numeric=(await request('data')).clients.find(c=>c.cnpj==='11222333000181')
 await request('clients','POST',{...numeric,cnpj:'12ABC34501DE35'},409);
 await request('clients/'+numeric.id,'DELETE');
 await request('clients','POST',{name:'Duplicado inativo',uf:'GO',city:'Goiânia',cnpj:'11222333000181'},409);
-assert.throws(()=>sqlite.prepare('INSERT INTO clients(id,name,uf,city,cnpj) VALUES(?,?,?,?,?)').run('race','Concorrente','GO','Goiânia','12ABC34501DE35'),/UNIQUE/);checks++;
+await assert.rejects(()=>pg.query('INSERT INTO clients(id,name,uf,city,cnpj) VALUES($1,$2,$3,$4,$5)',['race','Concorrente','GO','Goiânia','12ABC34501DE35']),/unique/i);checks++;
 const initial=data.stages.find(s=>s.initial),done=data.stages.find(s=>s.done),doing=data.stages.find(s=>s.name==='Fazendo');
 let t=await request('tasks','POST',{summary:'Preparar implantação com validação dos dados.',client_id:client.id,origin_id:'4',assignee_id:memberId,duration:1560,stage_id:done.id});check(t.stage_id===initial.id,'Criação respeita etapa inicial');check(t.creator_id===adminId&&t.duration===1560,'Criador e duração');
 await request('login','POST',member);let md=await request('data');check(md.notifications.length===1,'Responsável notificado');check(!('cpf' in md.users[0]),'Membro não recebe CPF');await request('users','POST',member,403);await request('tasks/'+t.id,'DELETE',null,403);cookie=adminCookie;
@@ -45,7 +47,7 @@ t=await request('tasks','POST',{...t,stage_id:doing.id});await request('users','
 const fd=new FormData();fd.set('task_id',String(t.id));fd.set('file',new File(['%PDF-1.4\nDocumento de teste'],'teste.pdf',{type:'application/pdf'}));await request('upload','POST',fd);let detail=await request('tasks/'+t.id);check(detail.attachments.length===1,'Anexo persistido');check((await request('files/'+detail.attachments[0].id)).startsWith('%PDF-'),'Download autenticado');const bad=new FormData();bad.set('task_id',String(t.id));bad.set('file',new File(['<script>bad</script>'],'fake.png',{type:'image/png'}));await request('upload','POST',bad,400);await request('files/'+detail.attachments[0].id,'DELETE');check((await request('tasks/'+t.id)).attachments.length===0,'Exclusão de anexo');
 await request('stages','POST',{name:'Validação',color:'#8844aa',initial:false,done:false});data=await request('data');const validation=data.stages.find(s=>s.name==='Validação');await request('stages','POST',{...doing,done:true},400);await request('stages/'+doing.id+'?target='+validation.id,'DELETE');t=(await request('tasks/'+t.id)).task;check(t.stage_id===validation.id,'Exclusão transfere tarefas atomicamente');await request('stages/'+done.id+'?target='+initial.id,'DELETE',null,400);
 t=await request('tasks','POST',{...t,assignee_id:adminId});await request('users/'+memberId,'DELETE');await request('clients/'+client.id,'DELETE');await request('tasks','POST',{summary:'Nova tarefa inválida',client_id:client.id,origin_id:'1',assignee_id:adminId},400);
-await request('notifications/read','POST');check((await request('data')).notifications.every(n=>n.read),'Leitura das notificações');await request('tasks/'+t.id,'DELETE');await request('tasks/'+t.id,'GET',null,404);check(sqlite.prepare('SELECT COUNT(*) n FROM history WHERE task_id=?').get(t.id).n>=9,'Histórico preservado na exclusão');
-const invalid=await api(new Request('https://test.local/api/clients',{method:'POST',headers:{cookie,origin:'https://evil.test','content-type':'application/json'},body:JSON.stringify({name:'X',city:'X',uf:'GO'})}),env,ctx);check(invalid.status===403,'Origem externa bloqueada');
+await request('notifications/read','POST');check((await request('data')).notifications.every(n=>n.read),'Leitura das notificações');await request('tasks/'+t.id,'DELETE');await request('tasks/'+t.id,'GET',null,404);check((await pg.query('SELECT COUNT(*)::integer n FROM history WHERE task_id=$1',[t.id])).rows[0].n>=9,'Histórico preservado na exclusão');
+const invalid=await api(new Request('https://test.local/api/clients',{method:'POST',headers:{cookie,origin:'https://evil.test','content-type':'application/json'},body:JSON.stringify({name:'X',city:'X',uf:'GO'})}),env,ctx,factory);check(invalid.status===403,'Origem externa bloqueada');
 await request('logout','POST',{});await request('data','GET',null,401);for(let i=0;i<8;i++)await request('login','POST',{username:'unknown',password:'bad'},401);await request('login','POST',{username:'unknown',password:'bad'},429);
-console.log(`PASSOU: ${checks} verificações de integração; CRUD, autenticação, permissões, Kanban, concorrência, histórico, notificações, anexos e limitação de login.`);sqlite.close();
+console.log(`PASSOU: ${checks} verificações de integração; CRUD, autenticação, permissões, Kanban, concorrência, histórico, notificações, anexos e limitação de login.`);await pg.close();
