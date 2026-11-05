@@ -6,6 +6,7 @@ import {Database} from '../db/postgres.ts';
 const pg=new PGlite(),sqlite=new DatabaseSync(':memory:');
 for(const name of ['0000_curvy_ezekiel_stane','0001_integrity','0002_parallel_doomsday'])sqlite.exec(readFileSync('drizzle/'+name+'.sql','utf8'));
 await pg.exec(readFileSync('supabase/migrations/202611040001_initial.sql','utf8'));
+await pg.exec(readFileSync(new URL('../supabase/migrations/202611050001_enable_rls.sql',import.meta.url),'utf8'));
 await pg.exec('SET search_path TO multtek,pg_catalog');
 const tables=sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name<>'sqlite_sequence'").all();
 assert.equal(tables.length,12);

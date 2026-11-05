@@ -8,6 +8,7 @@ try {
  await db.query('CREATE SCHEMA IF NOT EXISTS multtek_migrations');
  await db.query('REVOKE ALL ON SCHEMA multtek_migrations FROM PUBLIC');
  await db.query('CREATE TABLE IF NOT EXISTS multtek_migrations.applied(name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())');
+ await db.query('ALTER TABLE multtek_migrations.applied ENABLE ROW LEVEL SECURITY');
  for(const name of readdirSync('supabase/migrations').filter(x=>x.endsWith('.sql')).sort()){
   const sql=readFileSync('supabase/migrations/'+name,'utf8'),checksum=createHash('sha256').update(sql).digest('hex');
   const old=(await db.query('SELECT checksum FROM multtek_migrations.applied WHERE name=$1',[name])).rows[0];

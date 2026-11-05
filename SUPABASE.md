@@ -27,3 +27,7 @@ Antes de trocar o endereço público: congelar escritas na origem, exportar back
 Validação local usa PGlite (motor PostgreSQL WASM), não uma conexão ao Supabase. Validação de TLS, pooler, credenciais, privilégios da role real, entrega push e R2 deve ocorrer no ambiente provisionado antes de considerar a migração concluída.
 
 Antes da publicação, informe a região real do projeto Supabase para configurar o posicionamento do Worker próximo ao banco.
+
+## Aplicação em 05/11/2026
+
+Estrutura aplicada no projeto szchrowkauayfhibstft (Multtek, Grupo HW), região AWS us-west-2. As 12 tabelas/72 campos foram conferidos no painel. RLS habilitado, sem políticas para anon/authenticated. A role multtek_app recebe políticas exclusivas para o backend no script runtime-role.sql; essas permissões ainda dependem de autorização e provisionamento no ambiente real. DATABASE_URL e testes via Cloudflare permanecem pendentes. Não foram importados dados da base anterior.

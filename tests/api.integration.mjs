@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {api} from '../lib/api.ts';
 const pg=new PGlite();
 await pg.exec(readFileSync(new URL('../supabase/migrations/202611040001_initial.sql',import.meta.url),'utf8'));
+await pg.exec(readFileSync(new URL('../supabase/migrations/202611050001_enable_rls.sql',import.meta.url),'utf8'));
 await pg.exec('SET search_path TO multtek,pg_catalog');
 const db=new Database(pg,async()=>{});
 const factory=async()=>db;
