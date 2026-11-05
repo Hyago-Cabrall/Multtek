@@ -45,3 +45,19 @@ Na criação omita `id`/`version`; a API escolhe a etapa inicial, o criador e as
 `role` aceita `admin` ou `member`. `active`, `initial` e `done` aceitam booleanos ou 0/1. CPF e telefone são normalizados para dígitos. A senha de usuário, quando vazia na edição, é mantida. Usuário de acesso admite letras, números, ponto, hífen e sublinhado, entre 3 e 50 caracteres; usuário e e-mail são normalizados para minúsculas.
 
 CNPJ do cliente: string opcional com 12 posições alfanuméricas e 2 dígitos numéricos válidos, com ou sem máscara. É armazenado sem máscara em maiúsculas. Vazio vira null; omitir o campo na edição preserva o valor existente. Duplicidade (inclusive em cliente inativo) retorna 409.
+# Importação de clientes
+
+`POST /api/clients/import` exige sessão autenticada e a mesma origem da aplicação,
+seguindo as permissões do cadastro de clientes. Recebe `{rows: [{name, cnpj, uf,
+city, line?}]}` em lotes de até 250 linhas e 1 MB. Retorna `{inserted, skipped,
+invalid: [{line, error}]}`. Campos extras são ignorados. A validação é repetida no
+servidor. CNPJs existentes, inclusive em clientes inativos, não são atualizados nem
+reativados. A restrição única e `ON CONFLICT DO NOTHING` evitam duplicações entre
+lotes, reenvios e importações concorrentes.
+
+Na aba Clientes, o XLSX é lido no navegador e só os quatro campos selecionados são
+enviados à API após confirmação. O arquivo original não é armazenado. A primeira
+aba aceita os cabeçalhos `nome_cartorio`, `cpfcnpj`, `uf`, `cidade`, além de nomes
+equivalentes como Nome do cliente, CNPJ e Município. A prévia aponta linhas
+inválidas e duplicadas antes da gravação. CNPJs incompletos em texto e CPFs são
+rejeitados. Limites de seleção: 5 MB e 10.000 linhas.

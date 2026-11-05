@@ -1,6 +1,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { postgresAdapter, postgresSql } from '../lib/postgres-db.ts';
+import {testClientImport} from './client-import-scenarios.mjs';
 
 const engine = new PGlite();
 await engine.exec('CREATE ROLE anon; CREATE ROLE authenticated;');
@@ -25,7 +26,7 @@ const scenarios = source.slice(source.indexOf('const objects='))
 const { default: assert } = await import('node:assert/strict');
 const { api } = await import('../lib/api.ts');
 try {
-  await new (Object.getPrototypeOf(async function(){}).constructor)('db','assert','api',scenarios)(db,assert,api);
+  await new (Object.getPrototypeOf(async function(){}).constructor)('db','assert','api','testClientImport',scenarios)(db,assert,api,testClientImport);
   assert.equal(postgresSql("SELECT '?' AS literal FROM users WHERE id=?"), "SELECT '?' AS literal FROM multtek.users WHERE id=$1");
   const isolation = await engine.query("SELECT has_schema_privilege('anon','multtek','USAGE') allowed");
   assert.equal(isolation.rows[0].allowed, false);

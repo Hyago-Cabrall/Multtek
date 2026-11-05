@@ -2,6 +2,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import {api} from '../lib/api.ts';
+import {testClientImport} from './client-import-scenarios.mjs';
 const sqlite=new DatabaseSync(':memory:');sqlite.exec('PRAGMA foreign_keys=ON');sqlite.exec(readFileSync(new URL('../drizzle/0000_curvy_ezekiel_stane.sql',import.meta.url),'utf8'));
 sqlite.exec(readFileSync(new URL('../drizzle/0001_integrity.sql',import.meta.url),'utf8'));
 sqlite.exec(readFileSync(new URL('../drizzle/0002_parallel_doomsday.sql',import.meta.url),'utf8'));
@@ -46,6 +47,7 @@ const fd=new FormData();fd.set('task_id',String(t.id));fd.set('file',new File(['
 await request('stages','POST',{name:'Validação',color:'#8844aa',initial:false,done:false});data=await request('data');const validation=data.stages.find(s=>s.name==='Validação');await request('stages','POST',{...doing,done:true},400);await request('stages/'+doing.id+'?target='+validation.id,'DELETE');t=(await request('tasks/'+t.id)).task;check(t.stage_id===validation.id,'Exclusão transfere tarefas atomicamente');await request('stages/'+done.id+'?target='+initial.id,'DELETE',null,400);
 t=await request('tasks','POST',{...t,assignee_id:adminId});await request('users/'+memberId,'DELETE');await request('clients/'+client.id,'DELETE');await request('tasks','POST',{summary:'Nova tarefa inválida',client_id:client.id,origin_id:'1',assignee_id:adminId},400);
 await request('notifications/read','POST');check((await request('data')).notifications.every(n=>n.read),'Leitura das notificações');await request('tasks/'+t.id,'DELETE');await request('tasks/'+t.id,'GET',null,404);check(sqlite.prepare('SELECT COUNT(*) n FROM history WHERE task_id=?').get(t.id).n>=9,'Histórico preservado na exclusão');
+await testClientImport(request,check);
 const invalid=await api(new Request('https://test.local/api/clients',{method:'POST',headers:{cookie,origin:'https://evil.test','content-type':'application/json'},body:JSON.stringify({name:'X',city:'X',uf:'GO'})}),env,ctx);check(invalid.status===403,'Origem externa bloqueada');
-await request('logout','POST',{});await request('data','GET',null,401);for(let i=0;i<8;i++)await request('login','POST',{username:'unknown',password:'bad'},401);await request('login','POST',{username:'unknown',password:'bad'},429);
+await request('logout','POST',{});await request('clients/import','POST',{rows:[{name:'Sem sessão'}]},401);await request('data','GET',null,401);for(let i=0;i<8;i++)await request('login','POST',{username:'unknown',password:'bad'},401);await request('login','POST',{username:'unknown',password:'bad'},429);
 console.log(`PASSOU: ${checks} verificações de integração; CRUD, autenticação, permissões, Kanban, concorrência, histórico, notificações, anexos e limitação de login.`);sqlite.close();

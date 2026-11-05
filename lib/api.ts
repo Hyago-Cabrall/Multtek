@@ -1,5 +1,6 @@
 // API interna. Todas as operações autorizadas no servidor.
 import {cpfValid,taskValid,conclusion,ufs,normalizeCnpj,cnpjValid} from './rules.mjs';
+import {validateImportClient} from './client-import.mjs';
 const enc=new TextEncoder();
 const uid=()=>crypto.randomUUID();
 const now=()=>new Date().toISOString();
@@ -21,7 +22,7 @@ export async function api(req:Request,env:any,ctx:ExecutionContext){
  const cookie=(req.headers.get('cookie')||'').match(/(?:^|;\s*)multtek_session=([^;]+)/)?.[1];
  const user=cookie?await one('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? AND u.active=1 AND u.deleted=0',await digest(cookie),Date.now()):null;
  if(path==='auth'&&method==='GET'){const count=await one('SELECT COUNT(*) n FROM users');return json({user:user?safeUser(user):null,setup:!count.n,setupKeyRequired:env.PUBLIC_DEPLOYMENT==='true',push:!!env.VAPID_PUBLIC_KEY,publicKey:env.VAPID_PUBLIC_KEY||null})}
- let b:any={};if(!['GET','DELETE'].includes(method)&&path!=='upload'){const raw=await req.text();if(raw){try{b=JSON.parse(raw)}catch{fail('JSON inválido.')}}}
+ let b:any={};if(!['GET','DELETE'].includes(method)&&path!=='upload'){const raw=await req.text();if(path==='clients/import'&&raw.length>1024*1024)fail('O lote excede o limite de 1 MB.',413);if(raw){try{b=JSON.parse(raw)}catch{fail('JSON inválido.')}}}
  if(path==='setup'&&method==='POST'){
   if(await one("SELECT key FROM settings WHERE key='initialized'"))fail('A instalação já foi concluída.',409);
   // Public bootstrap fails closed until the owner provisions a secret in Cloudflare.
@@ -55,6 +56,24 @@ export async function api(req:Request,env:any,ctx:ExecutionContext){
  if(old)await db.batch([q('UPDATE users SET name=?,username=?,email=?,cpf=?,phone=?,password=?,role=?,active=? WHERE id=?',...vals,b.id),...(!b.active||b.password?[q('DELETE FROM sessions WHERE user_id=?',b.id),q('DELETE FROM subscriptions WHERE user_id=?',b.id)]:[])]);else await q('INSERT INTO users(name,username,email,cpf,phone,password,role,active,id,created) VALUES(?,?,?,?,?,?,?,?,?,?)',...vals,uid(),now()).run();return json({ok:true});
  }
  if(path.startsWith('users/')&&method==='DELETE'){admin();const id=path.split('/')[1];const old=await one('SELECT * FROM users WHERE id=?',id);if(!old)fail('Usuário não encontrado.',404);if(old.role==='admin'&&old.active){const n=await one("SELECT COUNT(*) n FROM users WHERE role='admin' AND active=1 AND deleted=0");if(n.n<=1)fail('Não é possível excluir o último administrador ativo.')};const n=await one('SELECT COUNT(*) n FROM tasks t JOIN stages s ON s.id=t.stage_id WHERE t.assignee_id=? AND t.deleted=0 AND s.done=0',id);if(n.n)fail('Transfira as tarefas em aberto antes de excluir.');await db.batch([q('UPDATE users SET active=0,deleted=1 WHERE id=?',id),q('DELETE FROM sessions WHERE user_id=?',id),q('DELETE FROM subscriptions WHERE user_id=?',id)]);return json({ok:true})}
+ if(path==='clients/import'&&method==='POST'){
+  if(!Array.isArray(b.rows)||!b.rows.length||b.rows.length>250)fail('Envie entre 1 e 250 clientes por lote.');
+  const valid:any[]=[],invalid:any[]=[],seen=new Set<string>();let repeated=0;
+  for(let i=0;i<b.rows.length;i++){
+   const row=b.rows[i],line=Number.isSafeInteger(row?.line)&&row.line>0?row.line:i+2;
+   const {client,error}=validateImportClient(row);
+   if(error){invalid.push({line,error});continue;}
+   if(seen.has(client.cnpj)){repeated++;continue;}seen.add(client.cnpj);valid.push(client);
+  }
+  const jobs=[];
+  for(let start=0;start<valid.length;start+=20){
+   const batch=valid.slice(start,start+20);
+   jobs.push(q('INSERT INTO clients(id,name,uf,city,cnpj) VALUES '+batch.map(()=>'(?,?,?,?,?)').join(',')+' ON CONFLICT(cnpj) DO NOTHING',...batch.flatMap(c=>[uid(),c.name,c.uf,c.city,c.cnpj])));
+  }
+  const result=jobs.length?await db.batch(jobs):[];
+  const inserted=result.reduce((sum:number,r:any)=>sum+Number(r.meta.changes),0);
+  return json({inserted,skipped:valid.length-inserted+repeated,invalid});
+ }
  if(path==='clients'&&method==='POST'){
  if(!b.name?.trim()||!b.city?.trim()||!ufs.includes(b.uf))fail('Preencha nome, UF e cidade.');
  const old=b.id?await one('SELECT * FROM clients WHERE id=?',b.id):null;if(b.id&&!old)fail('Cliente não encontrado.',404);
